@@ -12,6 +12,18 @@ const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: "@_",
   removeNSPrefix: true,
+  // fast-xml-parser v5 caps entity expansion at 1000 by default. The TNSO
+  // dataflow listing embeds ~15k predefined entities (&lt;/&gt;/&amp; inside
+  // annotation text), which trips that cap. Raise the limits so the large
+  // multilingual .Stat/NSI responses parse. The endpoint is trusted and the
+  // payloads are only a few MB, so the expansion-bomb protection is not
+  // relevant here.
+  processEntities: {
+    enabled: true,
+    maxTotalExpansions: 5_000_000,
+    maxExpandedLength: 50_000_000,
+    maxEntityCount: 100_000,
+  },
 });
 
 export class MetadataService {
@@ -32,13 +44,13 @@ export class MetadataService {
       return this.dataflowCache;
     }
 
-    const xml = await this.client.fetchMetadata("dataflow/ECB");
+    const xml = await this.client.fetchMetadata("dataflow/TNSO");
     const parsed = parser.parse(xml);
 
     const dataflows = extractDataflows(parsed);
     this.dataflowCache = dataflows;
 
-    logger.debug(`Parsed ${dataflows.length} dataflows from ECB metadata`);
+    logger.debug(`Parsed ${dataflows.length} dataflows from TNSO metadata`);
     return dataflows;
   }
 
@@ -80,11 +92,12 @@ export class MetadataService {
       );
     }
 
-    // Find structure ID from the dataflow definition
-    const structureId = findStructureId(dataflowId);
-
+    // Fetch the dataflow together with its DSD and codelists. The .Stat/NSI
+    // node serves the full structure via references=all on the dataflow
+    // itself, so we read the real referenced DSD instead of guessing a DSD
+    // id from an ECB naming convention.
     const xml = await this.client.fetchMetadata(
-      `datastructure/ECB/${structureId}?references=children`,
+      `dataflow/TNSO/${flow.id}?references=all`,
     );
     const parsed = parser.parse(xml);
 
@@ -112,32 +125,10 @@ function extractDataflows(parsed: Record<string, unknown>): DataflowInfo[] {
 
   return flows.map((flow: Record<string, unknown>) => {
     const id = (flow["@_id"] as string) || "";
-    const nameNode = flow.Name;
-    const name =
-      typeof nameNode === "string"
-        ? nameNode
-        : typeof nameNode === "object" && nameNode !== null
-          ? ((nameNode as Record<string, unknown>)["#text"] as string) || id
-          : id;
+    const name = extractName(flow.Name) || id;
 
     return { id, name, description: name };
   });
-}
-
-/**
- * Known mapping of dataflow ID → data structure definition ID.
- * For the 5 built-in dataflows we know the IDs. For others,
- * we use a convention: ECB_{dataflowId}1.
- */
-function findStructureId(dataflowId: string): string {
-  const known: Record<string, string> = {
-    EXR: "ECB_EXR1",
-    FM: "ECB_FM1",
-    YC: "ECB_YC1",
-    ICP: "ECB_ICP1",
-    BSI: "ECB_BSI1",
-  };
-  return known[dataflowId.toUpperCase()] || `ECB_${dataflowId.toUpperCase()}1`;
 }
 
 function extractStructure(
@@ -224,6 +215,20 @@ function extractStructure(
 
 function extractName(nameNode: unknown): string {
   if (typeof nameNode === "string") return nameNode;
+  // TNSO serves multilingual labels, e.g.
+  //   <common:Name xml:lang="th">…</common:Name>
+  //   <common:Name xml:lang="en">…</common:Name>
+  // fast-xml-parser represents repeated <Name> nodes as an array. Prefer the
+  // English entry (so keyword search matches English), else the first one.
+  if (Array.isArray(nameNode)) {
+    const en = nameNode.find(
+      (n) =>
+        typeof n === "object" &&
+        n !== null &&
+        (n as Record<string, unknown>)["@_lang"] === "en",
+    );
+    return extractName(en ?? nameNode[0]);
+  }
   if (typeof nameNode === "object" && nameNode !== null) {
     return ((nameNode as Record<string, unknown>)["#text"] as string) || "";
   }

@@ -9,6 +9,7 @@ import {
   handleGetExchangeRates,
 } from "./tools/exchange-rate.js";
 import { handleExplainDataset } from "./tools/explain.js";
+import { handleGetData } from "./tools/get-data.js";
 import { handleGetInflation } from "./tools/inflation.js";
 import { handleGetInterestRates } from "./tools/interest-rate.js";
 import { handleGetMoneySupply } from "./tools/money-supply.js";
@@ -315,6 +316,52 @@ Examples of questions this tool answers:
   },
   async (input) => {
     const text = await handleExplainDataset(metadata, input);
+    return { content: [{ type: "text" as const, text }] };
+  },
+);
+
+server.tool(
+  "get_data",
+  `Query observations from any TNSO (Thailand National Statistical Office) SDMX dataflow.
+
+This is the generic data tool for the TNSO endpoint. Provide a full flow reference
+(AGENCY,DATAFLOW,VERSION) and a dot-separated dimension key. Use search_datasets to
+find dataflow ids and explain_dataset to learn a dataflow's dimensions and codes.
+
+Note: TNSO TIME_PERIOD values use the Buddhist Era calendar — subtract 543 for the
+Gregorian year (e.g. 2564 = 2021).
+
+Example:
+- flowRef "TNSO,DF_01DI_IND_AGING,1.0", key "DEM_IND101._T._T.58.0.INX.A3" -> aging index`,
+  {
+    flowRef: z
+      .string()
+      .describe(
+        'Full SDMX flow reference "AGENCY,DATAFLOW,VERSION", e.g. "TNSO,DF_01DI_IND_AGING,1.0"',
+      ),
+    key: z
+      .string()
+      .optional()
+      .describe(
+        'Dot-separated dimension key, e.g. "DEM_IND101._T._T.58.0.INX.A3". Leave a segment empty to wildcard it. Omit or use "all" for every series.',
+      ),
+    startPeriod: z
+      .string()
+      .optional()
+      .describe("Start period (endpoint calendar; TNSO uses Buddhist Era years)"),
+    endPeriod: z
+      .string()
+      .optional()
+      .describe("End period (endpoint calendar; TNSO uses Buddhist Era years)"),
+    lastNObservations: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Return only the last N data points"),
+  },
+  async (input) => {
+    const text = await handleGetData(client, input);
     return { content: [{ type: "text" as const, text }] };
   },
 );

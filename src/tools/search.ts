@@ -14,7 +14,7 @@ export async function handleSearchDatasets(
     return `No datasets found matching "${input.query}". Try a broader search term, or use common keywords like "exchange", "interest", "inflation", "yield", "money", "balance", "payment".`;
   }
 
-  const header = `${results.length} dataset${results.length === 1 ? "" : "s"} found matching "${input.query}" (source: ECB)`;
+  const header = `${results.length} dataset${results.length === 1 ? "" : "s"} found matching "${input.query}" (source: TNSO)`;
   const lines = results.map((f) => `${f.id} — ${f.name}`);
 
   return `${header}\n\n${lines.join("\n")}`;

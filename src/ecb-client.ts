@@ -1,12 +1,12 @@
 import { logger } from "./logger.js";
 import type { EcbClientConfig } from "./types.js";
 
-const ECB_BASE_URL = "https://data-api.ecb.europa.eu/service";
+const ECB_BASE_URL = "https://ns1-stathub.nso.go.th/rest";
 
 export function createClientConfig(): EcbClientConfig {
   return {
     baseUrl: (process.env.ECB_API_URL || ECB_BASE_URL).replace(/\/+$/, ""),
-    timeoutMs: 10_000,
+    timeoutMs: 45_000,
     maxRetries: 3,
   };
 }
@@ -164,7 +164,7 @@ export class EcbClient {
 
     const response = await fetchWithRetry(
       url,
-      { Accept: "text/csv" },
+      { Accept: "text/csv", "Accept-Language": "en" },
       this.config,
     );
 
@@ -184,7 +184,7 @@ export class EcbClient {
 
     const response = await fetchWithRetry(
       url,
-      { Accept: "application/xml" },
+      { Accept: "application/xml", "Accept-Language": "en" },
       this.config,
     );
 
