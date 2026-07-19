@@ -4,6 +4,7 @@ import { z } from "zod";
 import { EcbClient, createClientConfig } from "./ecb-client.js";
 import { logger } from "./logger.js";
 import { MetadataService } from "./metadata.js";
+import { handleGetData } from "./tools/data-query.js";
 import {
   handleConvertCurrency,
   handleGetExchangeRates,
@@ -315,6 +316,55 @@ Examples of questions this tool answers:
   },
   async (input) => {
     const text = await handleExplainDataset(metadata, input);
+    return { content: [{ type: "text" as const, text }] };
+  },
+);
+
+server.tool(
+  "get_data",
+  `Run a raw SDMX data query against the ABS SDMX-REST API.
+
+Generic over every ABS dataflow: you supply the dataflow reference and a
+positional SDMX series key (one dot-separated segment per DSD dimension, empty
+segment = wildcard). Returns the matching observations as TIME_PERIOD,OBS_VALUE.
+
+Use search_datasets to find a dataflow id and explain_dataset to learn its
+dimensions/valid codes, then call this tool. The dataflow may be a bare id
+("CPI") or a full "agency,flow,version" reference.
+
+Examples of questions this tool answers:
+- "Estimated resident population for LGA code 0, persons, all ages, annual"
+  → dataflow "ABS,ABS_ANNUAL_ERP_LGA2016,1.0.0", key "ERP.3.TT.0.A"
+- "Latest CPI index value" → dataflow "CPI", key "1.10001.10.50.Q"`,
+  {
+    dataflow: z
+      .string()
+      .describe(
+        'Dataflow reference: a bare id ("CPI") or full "agency,flow,version" (e.g. "ABS,ABS_ANNUAL_ERP_LGA2016,1.0.0").',
+      ),
+    key: z
+      .string()
+      .optional()
+      .describe(
+        'Positional SDMX series key, dot-separated (e.g. "ERP.3.TT.0.A"). Leave a segment empty to wildcard it. Omit for all series.',
+      ),
+    startPeriod: z
+      .string()
+      .optional()
+      .describe("Start period (e.g. YYYY, YYYY-MM, YYYY-Qn)"),
+    endPeriod: z
+      .string()
+      .optional()
+      .describe("End period (e.g. YYYY, YYYY-MM, YYYY-Qn)"),
+    lastNObservations: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Return only the last N observations per series"),
+  },
+  async (input) => {
+    const text = await handleGetData(client, input);
     return { content: [{ type: "text" as const, text }] };
   },
 );

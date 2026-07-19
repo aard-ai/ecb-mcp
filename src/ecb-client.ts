@@ -1,12 +1,14 @@
 import { logger } from "./logger.js";
 import type { EcbClientConfig } from "./types.js";
 
-const ECB_BASE_URL = "https://data-api.ecb.europa.eu/service";
+// Retargeted from ECB Data Portal to the ABS SDMX-REST endpoint.
+const ABS_BASE_URL = "https://data.api.abs.gov.au/rest";
 
 export function createClientConfig(): EcbClientConfig {
   return {
-    baseUrl: (process.env.ECB_API_URL || ECB_BASE_URL).replace(/\/+$/, ""),
-    timeoutMs: 10_000,
+    baseUrl: (process.env.ECB_API_URL || ABS_BASE_URL).replace(/\/+$/, ""),
+    // ABS metadata (full dataflow list) can take ~35s; 10s was too short.
+    timeoutMs: 45_000,
     maxRetries: 3,
   };
 }

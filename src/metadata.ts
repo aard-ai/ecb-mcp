@@ -14,6 +14,10 @@ const parser = new XMLParser({
   removeNSPrefix: true,
 });
 
+// SDMX agency that owns the dataflows/structures at the target endpoint.
+// Retargeted from "ECB" to "ABS".
+const AGENCY = "ABS";
+
 export class MetadataService {
   private client: EcbClient;
   private dataflowCache: DataflowInfo[] | null = null;
@@ -32,13 +36,13 @@ export class MetadataService {
       return this.dataflowCache;
     }
 
-    const xml = await this.client.fetchMetadata("dataflow/ECB");
+    const xml = await this.client.fetchMetadata(`dataflow/${AGENCY}`);
     const parsed = parser.parse(xml);
 
     const dataflows = extractDataflows(parsed);
     this.dataflowCache = dataflows;
 
-    logger.debug(`Parsed ${dataflows.length} dataflows from ECB metadata`);
+    logger.debug(`Parsed ${dataflows.length} dataflows from ${AGENCY} metadata`);
     return dataflows;
   }
 
@@ -80,11 +84,12 @@ export class MetadataService {
       );
     }
 
-    // Find structure ID from the dataflow definition
-    const structureId = findStructureId(dataflowId);
-
+    // Resolve the real data structure by asking the endpoint to return the
+    // dataflow together with everything it references (its DSD + codelists).
+    // This replaces the old ECB_{ID}1 naming convention, which does not hold
+    // at ABS — the DataStructure ref is read from the live metadata instead.
     const xml = await this.client.fetchMetadata(
-      `datastructure/ECB/${structureId}?references=children`,
+      `dataflow/${AGENCY}/${flow.id}?references=all`,
     );
     const parsed = parser.parse(xml);
 
@@ -122,22 +127,6 @@ function extractDataflows(parsed: Record<string, unknown>): DataflowInfo[] {
 
     return { id, name, description: name };
   });
-}
-
-/**
- * Known mapping of dataflow ID → data structure definition ID.
- * For the 5 built-in dataflows we know the IDs. For others,
- * we use a convention: ECB_{dataflowId}1.
- */
-function findStructureId(dataflowId: string): string {
-  const known: Record<string, string> = {
-    EXR: "ECB_EXR1",
-    FM: "ECB_FM1",
-    YC: "ECB_YC1",
-    ICP: "ECB_ICP1",
-    BSI: "ECB_BSI1",
-  };
-  return known[dataflowId.toUpperCase()] || `ECB_${dataflowId.toUpperCase()}1`;
 }
 
 function extractStructure(

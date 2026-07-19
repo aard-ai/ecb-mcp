@@ -12,7 +12,7 @@ export async function handleExplainDataset(
 
   const lines: string[] = [];
   lines.push(
-    `Dataset: ${structure.dataflowId} — ${structure.name} (source: ECB)`,
+    `Dataset: ${structure.dataflowId} — ${structure.name} (source: ABS)`,
   );
   lines.push("");
   lines.push(`Dimensions (${structure.dimensions.length}):`);
