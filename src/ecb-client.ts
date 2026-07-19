@@ -1,12 +1,17 @@
 import { logger } from "./logger.js";
 import type { EcbClientConfig } from "./types.js";
 
-const ECB_BASE_URL = "https://data-api.ecb.europa.eu/service";
+// Retargeted to the OECD SDMX-REST v1 endpoint. OECD hosts every dataflow under
+// a sub-agency (e.g. OECD.SDD.TPS); the bare "OECD" agency has no flows.
+const ECB_BASE_URL = "https://sdmx.oecd.org/public/rest";
 
 export function createClientConfig(): EcbClientConfig {
   return {
     baseUrl: (process.env.ECB_API_URL || ECB_BASE_URL).replace(/\/+$/, ""),
-    timeoutMs: 10_000,
+    // OECD structure/discovery payloads are large (dataflow/all is ~8.8 MB and
+    // an individual DSD with embedded codelists can top 1 MB), so the original
+    // 10s ECB timeout is too tight for the metadata tools.
+    timeoutMs: 45_000,
     maxRetries: 3,
   };
 }
@@ -145,22 +150,39 @@ export class EcbClient {
   }
 
   /**
-   * Fetch data from an ECB SDMX dataflow.
-   * Returns raw CSV string.
+   * Fetch data from an OECD SDMX dataflow.
+   * Returns raw SDMX-CSV string.
    *
-   * @param dataflow - e.g. "EXR", "FM", "ICP"
-   * @param key - SDMX series key, e.g. "D.USD.EUR.SP00.A"
+   * OECD's SDMX-REST v1 data path requires the full flow reference
+   * `{agency},{dataflow},{version}` — the ECB-style short `data/{flow}/{key}`
+   * form 404s here. Agency is a sub-agency id (e.g. "OECD.SDD.TPS"); version is
+   * optional and, when omitted, SDMX resolves to the latest version.
+   *
+   * The ECB-portal-only `format=csvdata` query param is dropped; OECD returns
+   * SDMX-CSV purely off the `Accept: text/csv` header (verified 200).
+   *
+   * @param agency - owning (sub-)agency id, e.g. "OECD.SDD.TPS"
+   * @param dataflow - dataflow id, e.g. "DSD_CPI_COU_WEIGHTS@DF_CPI_CTRY_WEIGHTS"
+   * @param version - dataflow version, e.g. "1.0" (empty string = latest)
+   * @param key - SDMX series key, e.g. "AUS..." (dot per unfilled dimension)
    * @param params - optional query params (startPeriod, endPeriod, lastNObservations)
    */
   async fetchData(
+    agency: string,
     dataflow: string,
+    version: string,
     key: string,
     params?: Record<string, string>,
   ): Promise<string> {
-    const query = new URLSearchParams({ format: "csvdata", ...params });
-    const url = `${this.config.baseUrl}/data/${dataflow}/${key}?${query}`;
+    const flowRef = version
+      ? `${agency},${dataflow},${version}`
+      : `${agency},${dataflow}`;
+    const query = new URLSearchParams({ ...params }).toString();
+    const url = `${this.config.baseUrl}/data/${flowRef}/${key}${
+      query ? `?${query}` : ""
+    }`;
 
-    logger.debug("Fetching ECB data", { dataflow, key, url });
+    logger.debug("Fetching OECD data", { agency, dataflow, version, key, url });
 
     const response = await fetchWithRetry(
       url,
@@ -172,10 +194,10 @@ export class EcbClient {
   }
 
   /**
-   * Fetch metadata (XML) from the ECB SDMX API.
+   * Fetch metadata (XML) from the OECD SDMX API.
    * Returns raw XML string.
    *
-   * @param path - e.g. "dataflow/ECB" or "datastructure/ECB/ECB_EXR1?references=children"
+   * @param path - e.g. "dataflow/all" or "dataflow/OECD.SDD.TPS/{id}/{version}?references=all"
    */
   async fetchMetadata(path: string): Promise<string> {
     const url = `${this.config.baseUrl}/${path}`;

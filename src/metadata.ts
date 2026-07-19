@@ -6,6 +6,7 @@ import type {
   DataflowInfo,
   DimensionInfo,
   StructureInfo,
+  StructureRef,
 } from "./types.js";
 
 const parser = new XMLParser({
@@ -24,15 +25,19 @@ export class MetadataService {
   }
 
   /**
-   * Get the list of all ECB dataflows.
+   * Get the list of all OECD dataflows.
    * Cached in memory for the session. Failed fetches are NOT cached.
+   *
+   * OECD registers flows under sub-agencies (OECD.SDD.TPS, OECD.CFE.EDS, …),
+   * not a single "OECD" agency, so `dataflow/OECD` 404s. `dataflow/all`
+   * aggregates every hosted agency's flows.
    */
   async getDataflowList(): Promise<DataflowInfo[]> {
     if (this.dataflowCache) {
       return this.dataflowCache;
     }
 
-    const xml = await this.client.fetchMetadata("dataflow/ECB");
+    const xml = await this.client.fetchMetadata("dataflow/all");
     const parsed = parser.parse(xml);
 
     const dataflows = extractDataflows(parsed);
@@ -69,7 +74,7 @@ export class MetadataService {
       return cached;
     }
 
-    // First, find the structure reference for this dataflow
+    // First, find the dataflow (and its owning sub-agency) in the live list.
     const flows = await this.getDataflowList();
     const flow = flows.find(
       (f) => f.id.toUpperCase() === dataflowId.toUpperCase(),
@@ -80,11 +85,13 @@ export class MetadataService {
       );
     }
 
-    // Find structure ID from the dataflow definition
-    const structureId = findStructureId(dataflowId);
-
+    // Fetch the dataflow with all referenced structures (DSD + codelists),
+    // scoped to the flow's own sub-agency and version. OECD DSD ids do not
+    // follow the ECB `ECB_{ID}1` convention, so the real ref is read from the
+    // parsed dataflow rather than reconstructed by naming rule.
+    const versionSeg = flow.version ? `/${flow.version}` : "";
     const xml = await this.client.fetchMetadata(
-      `datastructure/ECB/${structureId}?references=children`,
+      `dataflow/${flow.agency}/${flow.id}${versionSeg}?references=all`,
     );
     const parsed = parser.parse(xml);
 
@@ -112,32 +119,28 @@ function extractDataflows(parsed: Record<string, unknown>): DataflowInfo[] {
 
   return flows.map((flow: Record<string, unknown>) => {
     const id = (flow["@_id"] as string) || "";
-    const nameNode = flow.Name;
-    const name =
-      typeof nameNode === "string"
-        ? nameNode
-        : typeof nameNode === "object" && nameNode !== null
-          ? ((nameNode as Record<string, unknown>)["#text"] as string) || id
-          : id;
+    const agency = (flow["@_agencyID"] as string) || "";
+    const version = (flow["@_version"] as string) || "";
+    const name = extractName(flow.Name) || id;
+    const structureRef = extractRef(flow.Structure);
 
-    return { id, name, description: name };
+    return { id, name, description: name, agency, version, structureRef };
   });
 }
 
 /**
- * Known mapping of dataflow ID → data structure definition ID.
- * For the 5 built-in dataflows we know the IDs. For others,
- * we use a convention: ECB_{dataflowId}1.
+ * Read an SDMX `<Structure><Ref .../></Structure>` reference, if present.
  */
-function findStructureId(dataflowId: string): string {
-  const known: Record<string, string> = {
-    EXR: "ECB_EXR1",
-    FM: "ECB_FM1",
-    YC: "ECB_YC1",
-    ICP: "ECB_ICP1",
-    BSI: "ECB_BSI1",
+function extractRef(structureNode: unknown): StructureRef | undefined {
+  const ref = navigatePath(structureNode as Record<string, unknown>, [
+    "Ref",
+  ]) as Record<string, unknown> | null;
+  if (!ref) return undefined;
+  return {
+    agency: (ref["@_agencyID"] as string) || "",
+    id: (ref["@_id"] as string) || "",
+    version: (ref["@_version"] as string) || "",
   };
-  return known[dataflowId.toUpperCase()] || `ECB_${dataflowId.toUpperCase()}1`;
 }
 
 function extractStructure(
@@ -224,6 +227,21 @@ function extractStructure(
 
 function extractName(nameNode: unknown): string {
   if (typeof nameNode === "string") return nameNode;
+
+  // OECD (and TNSO) serve multi-lingual names as an array of
+  // { "@_xml:lang": "en"|"fr"|…, "#text": "…" }. Prefer the English label,
+  // else fall back to the first entry.
+  if (Array.isArray(nameNode)) {
+    const en = nameNode.find(
+      (n) =>
+        typeof n === "object" &&
+        n !== null &&
+        (n as Record<string, unknown>)["@_xml:lang"] === "en",
+    );
+    const chosen = (en ?? nameNode[0]) as Record<string, unknown> | undefined;
+    return chosen ? (chosen["#text"] as string) || "" : "";
+  }
+
   if (typeof nameNode === "object" && nameNode !== null) {
     return ((nameNode as Record<string, unknown>)["#text"] as string) || "";
   }
