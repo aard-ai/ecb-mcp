@@ -1,3 +1,11 @@
+> [!WARNING]
+> **Research fork — not for data access.**
+>
+> `aard-ai/ecb-mcp` is a research clone of [`scka-de/ecb-mcp`](https://github.com/scka-de/ecb-mcp), kept for studying how
+> MCP servers behave when retargeted at other statistical agencies' SDMX endpoints. It is
+> not maintained, is not published to any package registry, and **must not be used as an
+> MCP server for data access**. For a working server, use the upstream project.
+
 # ecb-mcp
 
 European Central Bank data for AI agents. Exchange rates, interest rates, yield curves, inflation, money supply, and 100+ more datasets from the ECB — directly inside Claude, Cursor, Windsurf, or any MCP client.
